@@ -2,6 +2,8 @@
 
 A high-performance, physics-based character controller for PlayCanvas that provides smooth movement, jumping, slope handling, and moving platform support.
 
+![./media/demo.mp4](./media/demo.mp4)
+
 ### Demo: [https://playcanv.as/b/c2e720c5](https://playcanv.as/b/c2e720c5)
 ### Project: [https://playcanvas.com/editor/scene/2283593](https://playcanvas.com/editor/scene/2283593)
 
