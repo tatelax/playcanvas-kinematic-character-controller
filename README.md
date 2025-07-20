@@ -2,7 +2,11 @@
 
 A high-performance, physics-based character controller for PlayCanvas that provides smooth movement, jumping, slope handling, and moving platform support.
 
-<video src="media/demo.mp4" width="320" height="320" controls></video>
+
+
+https://github.com/user-attachments/assets/23b9d077-5261-42cd-b4b6-34aa163cb5e4
+
+
 
 ### Demo: [https://playcanv.as/b/c2e720c5](https://playcanv.as/b/c2e720c5)
 ### Project: [https://playcanvas.com/editor/scene/2283593](https://playcanvas.com/editor/scene/2283593)
