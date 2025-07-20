@@ -35,6 +35,9 @@ https://github.com/user-attachments/assets/23b9d077-5261-42cd-b4b6-34aa163cb5e4
 
 1. Copy the `kcc/` folder to your PlayCanvas project
 2. Copy the `Ammo/` folder to your project (contains the required ammo.js files)
+   1. Uncheck `Preload` on ammo.js
+   2. Set `Name` to `Ammo` under `WASM MODULE` for `ammo.wasm.wasm`
+   3. Set `Glue script` to `ammo.js` and `Fallback script` to `ammo.wasm.js`
 3. Add the scripts to your character entity:
    - `kcc.mjs` - Main controller script
    - `kccInputDesktop.mjs` - Desktop input handling
