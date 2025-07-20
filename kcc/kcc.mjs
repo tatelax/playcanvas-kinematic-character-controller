@@ -1,5 +1,5 @@
 import { Vec3, Quat, Script, Color } from 'playcanvas';
-import { clamp, EPS, projectOnPlane } from './kccUtils.mjs';
+import { clamp, EPS, projectOnPlane, sweep } from './kccUtils.mjs';
 
 /* ───────── controller ───────── */
 export class KCC extends Script {
@@ -8,7 +8,8 @@ export class KCC extends Script {
     /** Walk speed (m s⁻¹)             @attribute */ speed = 6;
     /** Gravity (m s⁻², − = down)      @attribute */ gravity = -9.81;
     /** Jump speed (m s⁻¹)             @attribute */ jumpSpeed = 6;
-    /** Air-control (0–1)              @attribute */ airControl = 1;
+    /** Scale speed in-air             @attribute
+     * @range [0, 1] */                              airControl = 1;
     /** Controller radius (m)          @attribute */ radius = 0.5;
     /** Sweeps / pass                  @attribute */ maxIterations = 5;
     /** Walkable slope (°)             @attribute */ slopeLimitDeg = 50;
@@ -16,14 +17,16 @@ export class KCC extends Script {
     /** Down-snap distance (m)         @attribute */ groundSnap = 0.3;
     /** Hover gap when grounded (m)    @attribute */ hover = 0.2;
 
-    /** Draw debug helpers?            @attribute */ debug = false;
-    castDebugColor = new Color(1, 0, 0, 1);
-    controllerGroundedDebugColor = new Color(0, 0, 1, 1);
-    controllerNotGroundedDebugColor = new Color(1, 0, 0, 1);
-    hitDebugColor = new Color(1, 1, 0, 1);
-    normalDebugColor = new Color(0, 1, 0, 1);
+    /** Draw debug helpers? @attribute          */ debug = false;
+    /** Color to show for casting @attribute
+     * @enabledif {debug}    */                    castDebugColor = new Color(1, 0, 0, 1);
+    /** Color to show for sphere @attribute
+     * @enabledif {debug}    */                    sphereDebugColor = new Color(0, 0, 1, 1);
+    /** Color to show for hit @attribute
+     * @enabledif {debug}    */                    hitDebugColor = new Color(1, 1, 0, 1);
+    /** Color to show for normal @attribute
+     * @enabledif {debug}    */                    normalDebugColor = new Color(0, 1, 0, 1);
 
-    /* ───────── runtime state ───────── */
     initialize() {
         this._velY = 0;
         this._horizontal = 0;
@@ -38,121 +41,15 @@ export class KCC extends Script {
         this._groundPrevRot = new Quat();
         this._groundCandidate = null;
 
-        this._steepNormal = null;     // ← remembers steep slope this frame
+        this._steepNormal = null;
     }
 
-    /* Called each frame by your input script */
+    /* Called each frame by input script */
     setInput(h = 0, v = 0, jump = false, yaw = 0) {
         this._horizontal = h;
         this._vertical = v;
         this._jumpPressed = jump;
         this._yawDelta = yaw;
-    }
-
-    /* ───────── helper: sweep & resolve ───────── */
-    _sweep(pos, disp, isVerticalPass) {
-        let remaining = disp.clone();
-
-        /* record up to two distinct wall normals (horizontal pass) */
-        let wallN1 = null;
-        let wallN2 = null;
-
-        for (let i = 0; i < this.maxIterations; ++i) {
-            if (remaining.lengthSq() < EPS) break;
-
-            const end = pos.clone().add(remaining);
-            const hit = this.app.systems.rigidbody.sphereCast(this.radius, pos, end);
-
-            if (this.debug) this.app.drawLine(pos, end, this.castDebugColor, false);
-
-            /* ▸ no hit – move fully */
-            if (!hit || !hit.entity) {
-                pos.add(remaining);
-                break;
-            }
-
-            /* ▸ step to just before impact */
-            const dir = remaining.clone().normalize();
-            const totalDist = remaining.length();
-            const hitDist = clamp(hit.hitFraction * totalDist, 0, totalDist);
-            const stepDist = Math.max(hitDist - this.skin, 0);
-            if (stepDist > EPS) pos.add(dir.clone().mulScalar(stepDist));
-
-            /* slope metrics */
-            const cosθ = clamp(hit.normal.dot(Vec3.UP), -1, 1);
-            const slopeDeg = Math.acos(cosθ) * 180 / Math.PI;
-            const walkable = slopeDeg < this.slopeLimitDeg;
-
-            /* ───── vertical (gravity) pass ───── */
-            if (isVerticalPass) {
-                const movingDown = remaining.y < 0;
-                const movingUp = remaining.y > 0;
-
-                /* ▸ ceiling */
-                if (movingUp) { this._velY = 0; break; }
-
-                if (movingDown) {
-                    if (walkable) {
-                        /* landing */
-                        this._grounded = true;
-                        this._groundCandidate = hit.entity;
-                        this._velY = 0;
-
-                        remaining = projectOnPlane(
-                            remaining.mulScalar(1 - hit.hitFraction),
-                            hit.normal
-                        );
-                        if (Math.abs(remaining.y) < EPS) remaining.y = 0;
-                    } else {
-                        /* steep – slide along slope with sinθ scaling */
-                        const sinθ = Math.sqrt(Math.max(1 - cosθ * cosθ, 0));
-                        const slideDir = projectOnPlane(Vec3.DOWN, hit.normal).normalize();
-                        const slideMag = Math.abs(remaining.y) * sinθ * (1 - hit.hitFraction);
-
-                        remaining = slideDir.mulScalar(slideMag);
-                        remaining.add(hit.normal.clone().mulScalar(this.skin));
-
-                        /* remember steep normal for uphill-clamp */
-                        this._steepNormal = hit.normal.clone();
-                    }
-                    continue;
-                }
-
-                /* ───── horizontal (player) pass ───── */
-            } else {
-                if (walkable) {
-                    this._grounded = true;
-                    this._groundCandidate = hit.entity;
-                    remaining = projectOnPlane(
-                        remaining.mulScalar(1 - hit.hitFraction),
-                        hit.normal
-                    );
-                } else {
-                    /* wall */
-                    const wallN = new Vec3(hit.normal.x, 0, hit.normal.z);
-                    if (wallN.lengthSq() > EPS) wallN.normalize();
-
-                    if (!wallN1) {
-                        wallN1 = wallN.clone();
-                    } else if (wallN.dot(wallN1) < 0.99) {
-                        wallN2 = wallN.clone();
-                    }
-
-                    /* if two distinct walls ⇒ corner lock */
-                    if (wallN1 && wallN2) {
-                        remaining.set(0, 0, 0);
-                    } else {
-                        const lockN = wallN1 || wallN;
-                        remaining = projectOnPlane(
-                            remaining.mulScalar(1 - hit.hitFraction),
-                            lockN
-                        );
-                        remaining.add(lockN.clone().mulScalar(this.skin));
-                    }
-                }
-            }
-        }
-        return pos;
     }
 
     /* ───────── main update ───────── */
@@ -228,11 +125,13 @@ export class KCC extends Script {
         this._grounded = false;
         this._groundCandidate = null;
 
+        /* vertical pass */
         if (Math.abs(desiredVert) > EPS)
-            pos = this._sweep(pos, new Vec3(0, desiredVert, 0), true);
+            pos = sweep(this, pos, new Vec3(0, desiredVert, 0), true);
 
+        /* horizontal pass */
         if (desiredHoriz.lengthSq() > EPS)
-            pos = this._sweep(pos, desiredHoriz, false);
+            pos = sweep(this, pos, desiredHoriz, false);
 
         /* clear steep flag for next frame */
         this._steepNormal = null;
